@@ -1,0 +1,364 @@
+---
+title: "10X Mouse Brain IHC Analysis"
+author: "Asif Zubair"
+date: '`r Sys.Date()`'
+output: github_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = F, message = F, fig.height=8, fig.width=12)
+```
+
+```{r libs}
+library(purrr)
+library(dplyr)
+library(ggpubr)
+library(ggplot2)
+library(ggExtra)
+library(ggcorrplot)
+library(imager)
+source("../utils/st_helpers.R")
+source("../utils/tmb2_helpers.R")
+
+## make export directory
+if (!file.exists("export/fig3")) {
+  dir.create("export/fig3", recursive = T)
+}
+```
+
+
+## Data
+
+```{r}
+## IF images
+glial_img  = "data/fig3/glial_channel.tif"
+neuron_img = "data/fig3/neuron_channel.tif" 
+
+## IF prior
+st_ihc_if = read.csv('data/fig3/st_ihc_tnxMouseBrain2_rescale_ratio_libsize_r70.csv', row.names = 1) %>% 
+  select(mean_rbfox3_ihc_rescale, mean_gfap_ihc_rescale) %>% 
+  rename(neuron = mean_rbfox3_ihc_rescale, glial = mean_gfap_ihc_rescale)
+
+## ST proportions, tissue positions
+st_props_base = readRDS("data/fig3/results_baycon_base_decon_10xMouseBrain2_sig_mat_stereo_sc_k5d10_sct")
+st_props_base_cumm <- get_props2(st_props_base) 
+tp <- load10xTP("data/fig3/tissue_positions_list.csv")
+
+## IF prior, mapping to GIST-base model
+st_ihc = read.csv('data/fig3/st_ihc_tnxMouseBrain2_rescale_ratio_libsize_r70.csv', row.names = 1) %>% 
+  select(mean_rbfox3_ihc_rescale, mean_gfap_ihc_rescale) %>% 
+  rename(neuron = mean_rbfox3_ihc_rescale, glial = mean_gfap_ihc_rescale) %>% 
+  tibble::rownames_to_column('spot') %>%
+  tidyr::gather("type", "ihc", -spot)
+st_ihc_mapped = readRDS('data/fig3/st_ihc_tnxMouseBrain2_rescale_mapped_to_base_decon_r70.rds') %>% 
+  tibble::rownames_to_column('spot') %>%
+  tidyr::gather("type", "ihc", -spot)
+
+## GIST-base and ground truth
+st_props_base_ihc_mapped <- get_props(st_props_base) %>%
+  inner_join(st_ihc_mapped, by = c("spot", "type"))  
+
+## GIST-enhanced and ground truth
+st_props_prior_50 <- readRDS('data/fig3/results_baycon_10xMouseBrain2_ihc_neuron_glial_class_beta_prior_r70_lambda_50_k5d10_sct.rds')
+st_props_prior_50_ihc_mapped <- get_props(st_props_prior_50) %>%
+  inner_join(st_ihc_mapped, by = c("spot", "type"))
+```
+
+
+## Plots
+
+## (A) 
+
+```{r}
+## Inkscape > Filters > Color > Lightness-Contrast
+## Lightness: 45
+## Contrast: 22
+
+## Glial slide
+## Lightness: 10.7 ?
+## Contrast: 2.67 ?
+
+## Neuronal slide
+## Lightness: 10.7 ?
+## Contrast: 2.67 ?
+
+## Image of glial marker on slide
+img = load.image(glial_img) %>% resize_halfXY() #%>% resize_halfXY() %>% resize_halfXY()
+png(file="./export/fig3/01a_glial_marker_on_slide_cropped.png", res=900, width=1350, height=1800, pointsize=10,
+		type="cairo", antialias="default")
+  par(mar=rep(0,4))
+  plot(img %>% 
+        imsub(x >  2700) %>% 
+        imsub(x <  6500) %>% 
+        imsub(y >  1100) %>% 
+        imsub(y <  9400), 
+      axes = F)
+dev.off()
+
+## Image of neuronal marker on slide
+img = load.image(neuron_img) %>% resize_halfXY() #%>% resize_halfXY() %>% resize_halfXY()
+png(file="./export/fig3/01a_neuronal_marker_on_slide_cropped.png", res=900, width=1350, height=1800, pointsize=10,
+		type="cairo", antialias="default")
+  par(mar=rep(0,4))
+  plot(img %>% 
+        imsub(x >  2700) %>% 
+        imsub(x <  6500) %>% 
+        imsub(y >  1100) %>% 
+        imsub(y <  9400), 
+      axes = F)
+dev.off()
+```
+
+
+## (B) 
+
+```{r}
+## IF prior
+p <- plot.spots(st_ihc_if, tp, size_m = 0.2, joint_scale = T, legend.label = "Prop.")  +
+  theme(#legend.key.size = unit(0.1, 'in'),
+        strip.background = element_rect(fill = "white", colour = "white"), 
+        axis.ticks = element_blank(),
+        strip.text = element_text(family="Arial", face="plain", size=8),
+        legend.text = element_text(family="Arial", face="plain", size=8),
+        legend.title = element_blank(),
+        legend.position = "bottom",
+        legend.key.width = unit(0.2, "in"),
+        legend.key.height = unit(0.06, "in"))
+ggsave(filename = "export/fig3/02_if_prior.svg", p, height=2.17, width=1.82, units = c("in"), dpi=300)
+```
+
+
+## (C) 
+
+```{r}
+## Aggregated estimates from "glia" & "neurons" from ST
+p <- plot.spots(st_props_base_cumm, tp, legend.label = "Prop.", size_m = 0.2, joint_scale = T) +
+  theme(#legend.key.size = unit(0.1, 'in'),
+        strip.background = element_rect(fill = "white", colour = "white"), 
+        axis.ticks = element_blank(),
+        strip.text = element_text(family="Arial", face="plain", size=8),
+        legend.text = element_text(family="Arial", face="plain", size=8),
+        legend.title = element_blank(),
+        legend.position = "bottom",
+        legend.key.width = unit(0.2, "in"),
+        legend.key.height = unit(0.06, "in")) 
+ggsave(filename = "export/fig3/03_agg_glial_neuron_from_st_props_base.svg", 
+       plot = p, 
+       height = 2.17, width = 1.82, units = c("in"), 
+       dpi = 300)
+```
+
+
+## (D) 
+
+```{r}
+## unmapped proportion estimates from ST vs estimated from image
+
+## glia
+svg(file="./export/fig3/04a_unmapped_glial_estimates_vs_image.svg", width=2.5, height=2.5, pointsize=10, antialias="default")
+  par(mai= c(0.75, 0.75, 0.25, 0.25))
+  qq_ihc(st_props_base_cumm %>% 
+    tibble::rownames_to_column("spot") %>% 
+    tidyr::gather("type", "estimates", -spot), st_ihc, "glial", 
+    cex = 0.5, cex.axis = 1, cex.main = 1, cex.lab = 1, 
+    pch = 16, 
+    bty = "l", las = 1, 
+    xlim = c(0,1), ylim = c(0,1), 
+    main = "Glial",
+    tcl=-0.25, col = "#00000066")
+dev.off()
+
+## neurons
+svg(file="./export/fig3/04b_unmapped_neuronal_estimates_vs_image.svg", width=2.5, height=2.5, pointsize=10, antialias="default")
+  par(mai= c(0.75, 0.75, 0.25, 0.25))
+  qq_ihc(st_props_base_cumm %>% 
+    tibble::rownames_to_column("spot") %>% 
+    tidyr::gather("type", "estimates", -spot), st_ihc, "neuron", 
+    cex = 0.5, cex.axis = 1, cex.main = 1, cex.lab = 1, 
+    pch = 16, bty = "l", las = 1, 
+    xlim = c(0,1), ylim = c(0,1), 
+    main = "Neuron",
+    tcl=-0.25, col = "#00000066")
+  #Axis(side=1, labels=F)
+dev.off()
+```
+
+
+## (E) 
+
+```{r}
+## “Mapped” estimates for glial (i.e. after projection of image derived proportion estimates onto the quantiles derived from the fit of the deconvolution model)
+
+## glia
+svg(file="./export/fig3/05a_mapped_glial_estimates_vs_image.svg", width=2.5, height=2.5, pointsize=10, antialias="default")
+  par(mai= c(0.75, 0.75, 0.25, 0.25))
+qq_ihc(st_props_base_cumm %>% 
+  tibble::rownames_to_column("spot") %>% 
+  tidyr::gather("type", "estimates", -spot), st_ihc_mapped, "glial", 
+  cex = 0.5, cex.axis = 1, cex.main = 1, cex.lab = 1, 
+  pch = 16, bty = "l", las = 1, 
+  xlim = c(0,1), ylim = c(0,1), 
+  main = "Glial",
+  tcl=-0.25, col = "#00000066")
+dev.off()
+
+## neurons
+svg(file="./export/fig3/05b_mapped_neuronal_estimates_vs_image.svg", width=2.5, height=2.5, pointsize=10, antialias="default")
+  par(mai= c(0.75, 0.75, 0.25, 0.25))
+qq_ihc(st_props_base_cumm %>% 
+  tibble::rownames_to_column("spot") %>% 
+  tidyr::gather("type", "estimates", -spot), st_ihc_mapped, "neuron", 
+  cex = 0.5, cex.axis = 1, cex.main = 1, cex.lab = 1, 
+  pch = 16, bty = "l", las = 1, 
+  xlim = c(0,1), ylim = c(0,1), 
+  main = "Neuron",
+  tcl=-0.25, col = "#00000066")
+dev.off()
+```
+
+
+## (F)
+
+```{r}
+## Spatial distribution of neurons and glia post mapping
+df = readRDS("data/fig3/st_ihc_tnxMouseBrain2_rescale_mapped_to_base_decon_r70.rds")
+p <- plot.spots(df, tp, legend.label = "Prop.", size_m = 0.2, joint_scale = T) +
+  theme(#legend.key.size = unit(0.1, 'in'),
+    strip.background = element_rect(fill = "white", colour = "white"), 
+    axis.ticks = element_blank(),
+    strip.text = element_text(family="Arial", face="plain", size=8),
+    legend.text = element_text(family="Arial", face="plain", size=8),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.key.width = unit(0.2, "in"),
+    legend.key.height = unit(0.06, "in")) 
+ggsave(filename = "export/fig3/06_if_prior_mapped.svg", 
+       plot = p, 
+       height = 2.17, width = 1.82, units = c("in"), 
+       dpi = 300)
+```
+
+
+## (G) 
+
+```{r}
+## Performance comparison of GIST-base and other methods
+df <- data.frame(method = c("GIST base", "Stereoscope", "RCTD", "SPOTlight", "cell2location"), 
+                 Neuron = c(0.77, 0.19, 0.77, 0.71, 0.75), 
+                 Glial = c(0.49, 0.2, 0.33, 0.32, 0.27))
+p <- df %>% 
+  tidyr::gather(key = "cell_type", value = "spearman_corr", -method) %>% 
+  ggplot(aes(x = forcats::fct_relevel(cell_type, "Neuron"), y = spearman_corr, fill = forcats::fct_reorder(method, -spearman_corr))) +
+  geom_bar(position = position_dodge2(), stat = "identity") +
+  coord_flip() +
+  theme(#legend.key.size = unit(0.08, 'in'),
+        #legend.box.margin = margin(5.25,14,5.25,14),
+        legend.key.width = unit(0.06, "in"),
+        legend.key.height = unit(0.06, "in"),
+        legend.key = element_rect(colour = "white", fill = "white"),
+        legend.title = element_blank(),
+        legend.text = element_text(family="Arial", face="plain", size=8),
+        legend.box.background = element_rect(colour = "white"),
+        legend.box.margin = margin(0,0,0,0),
+        legend.position = "bottom",
+        legend.direction = "horizontal", 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.background = element_rect(fill = "white", colour = "white"),
+        axis.ticks = element_line(colour = "black", size = 0.1),
+        axis.line = element_line(colour="black", size = 0.3),
+        axis.text = element_text(family="Arial", face="plain", size=8, colour = "black"),
+        axis.title = element_text(family="Arial", face="plain", size=8),
+        axis.title.y = element_blank()) +
+  scale_fill_manual(values= c("#9ecae1", "#a1d99b", "#fdae6b", "#bcbddc", "#fc9272")) +
+  ylab("Correlation") + 
+  guides(fill=guide_legend(reverse=TRUE))
+ggsave(filename="export/fig3/07_corr_comparison_plot.svg", plot=p, height=1.8, width=3.2, units=c("in"), dpi=300)
+```
+
+
+## (H)
+
+```{r}
+## Line plot when prior is added to neurons
+zoom_lambda = c(   10,   20,   30,   40,   50,   60,   70,   80,   90,  100,  110,  120,  130,  140,  150,  160,  170,  180,  190,  200,  210,  220,  230,  240,  250)
+zoom_neuron = c( 0.79, 0.81, 0.83, 0.84, 0.86, 0.87, 0.88, 0.89, 0.89, 0.90, 0.91, 0.91, 0.92, 0.92, 0.93, 0.93, 0.94, 0.94, 0.94, 0.94, 0.95, 0.95, 0.95, 0.95, 0.96)
+zoom_glial =  c( 0.49, 0.49, 0.49, 0.49, 0.49, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.48, 0.47, 0.47)
+corrs = data.frame(
+      prior_lambda = c(   1,    2, zoom_lambda,  300,  350,  400,  450,  500,  550,  600,  650,  700,  750,  800,  850,  900,  950, 1000), 
+            neuron = c(0.77, 0.77, zoom_neuron, 0.96, 0.97, 0.97, 0.98, 0.98, 0.98, 0.99, 0.99, 0.99, 0.99, 0.99, 0.99, 0.99, 0.99, 0.99),
+            glial =  c(0.49, 0.49,  zoom_glial, 0.47, 0.47, 0.47, 0.47, 0.47, 0.47, 0.47, 0.47, 0.47, 0.46, 0.46, 0.46, 0.46, 0.46, 0.46))
+p <- corrs %>% 
+  tidyr::gather("type", "corr", -prior_lambda) %>% 
+  ggplot(aes(prior_lambda, corr)) + 
+  geom_line(aes(color=type), size = 0.5) +
+  geom_point(aes(color=type), size = 0.25) +
+  xlab(sprintf('Hyperparameter (\u03BB)')) + 
+  ylab("Correlation") + 
+  labs(color="cell type") +
+  theme(axis.line = element_line(colour="black", size=0.3),
+        axis.text = element_text(colour = "black", family="Arial", face="plain", size=8),
+        axis.title = element_text(family="Arial", face="plain", size=8),
+        axis.ticks = element_line(color = "black", size = 0.1),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        #panel.border = element_rect(colour = "white"),
+        panel.background = element_rect(fill = "white", colour = "white"),
+        legend.key = element_rect(colour = "white", fill = "white"),
+        legend.position = c(0.8, 0.7),
+        legend.direction = "vertical",
+        legend.key.size= unit(0.2, "in"),
+        legend.spacing = unit(0, "cm"),
+        legend.title = element_blank(),
+        legend.text = element_text(family="Arial", face="plain", size=8),
+        legend.box.background = element_rect(colour = "white")) + 
+  geom_vline(xintercept = 50, color = "red", linetype = "dashed") +
+  scale_color_manual(values=c('#43a2ca', '#31a354'))
+ggsave(filename="export/fig3/08_line_plot_on_neuron.svg", plot=p, height=1.3, width=2.57, units=c("in"), dpi=300)
+```
+
+
+## (I) 
+
+```{r}
+p <- ggplot(st_props_base_ihc_mapped, aes(ihc, estimates)) + 
+  facet_wrap(~type, scales = "free_y", ncol = 3) +
+  geom_point(size = 0.1, alpha = 0.4) +
+  ggpubr::stat_cor(method='spearman', cor.coef.name = 'rho', size = 3, 
+                   label.x.npc = 'left', label.y.npc = 'top') +
+  geom_abline(slope = 1, intercept = 0, colour = "red") + 
+  xlab("Ground truth (IF-derived proportions)") +
+  theme(strip.background = element_rect(fill = "white", colour = "white"), 
+        strip.text = element_text(family="Arial", face="plain", size=8), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.background = element_rect(fill = "white", colour = "white"),
+        axis.ticks = element_line(colour = "black", size = 0.1),
+        axis.line = element_line(colour="black", size = 0.3),
+        axis.text = element_text(family="Arial", face="plain", size=8, colour="black"),
+        axis.title = element_text(family="Arial", face="plain", size=8)) +
+  ylab("Gene expression-\n derived proportions")
+ggsave(filename="export/fig3/09a_corr_plot_flat_prior_on_both_channels.svg", plot=p, height=2.1, width=4, units=c("in"), dpi=300)
+
+## Final correlations when both priors have been added
+p <- ggplot(st_props_prior_50_ihc_mapped, aes(ihc, estimates)) + 
+  facet_wrap(~type, scales = "free_y", ncol = 3) +
+  geom_point(size = 0.1, alpha = 0.4) +
+  ggpubr::stat_cor(method='spearman', cor.coef.name = 'rho', size = 3, 
+                   label.x.npc = 'left', label.y.npc = 'top') +
+  geom_abline(slope = 1, intercept = 0, colour = "red") + 
+  xlab("Ground truth (IF-derived proportions)") +
+  theme(strip.background = element_rect(fill = "white", colour = "white"), 
+        strip.text = element_text(family="Arial", face="plain", size=8), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        panel.background = element_rect(fill = "white", colour = "white"),
+        axis.ticks = element_line(colour = "black", size = 0.1),
+        axis.line = element_line(colour="black", size = 0.3),
+        axis.text = element_text(family="Arial", face="plain", size=8, colour = "black"),
+        axis.title = element_text(family="Arial", face="plain", size=8)) +
+  ylab(sprintf('GIST-derived\nproportions (\u03BB = 50)'))
+ggsave(filename="export/fig3/09b_corr_plot_if_prior_on_both_channels.svg", plot=p, height=2.1, width=4, units=c("in"), dpi=300)
+```

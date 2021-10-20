@@ -1,0 +1,200 @@
+---
+title: "fig2_simulations"
+author: "asif zubair"
+date: "9/15/2021"
+output: github_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = F, message = F, fig.height=8, fig.width=12)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+
+## make export directory
+if (!file.exists("export/fig2")) {
+  dir.create("export/fig2", recursive = T)
+}
+```
+
+
+## Splatter+ simulations
+
+```{r}
+results <- readRDS("./data/fig2/results-splatter-plus.29Apr2020.rds")
+cols <- paste0("Group", seq(6))
+rows <- paste0("Bulk", seq(100))
+results <- lapply(results[1:8], function(x){colnames(x) <- cols; rownames(x) <- rows; x})
+
+gold_standard <- results$truth
+truefractions <- gold_standard %>% as.data.frame() %>% tibble::rownames_to_column("sample") %>% 
+  tidyr::gather("type", "truefraction", -sample)
+
+types = c(Group1 = "Cell type 1",
+          Group2 = "Cell type 2",
+          Group3 = "Cell type 3",
+          Group4 = "Cell type 4",
+          Group5 = "Cell type 5",
+          Group6 = "Cell type 6")
+```
+
+
+```{r}
+## Linear Regression
+linreg <- results$lm %>% as.data.frame() %>%
+  tibble::rownames_to_column("sample") %>% 
+  tidyr::gather("type", "estimates", -sample) %>% 
+  inner_join(truefractions, by=c("sample", "type")) %>%
+  mutate(lm = (estimates - truefraction))
+
+## CIBERSORT
+cbs <- results$cbs %>% as.data.frame() %>%
+  tibble::rownames_to_column("sample") %>% 
+  tidyr::gather("type", "estimates", -sample) %>% 
+  inner_join(truefractions, by=c("sample", "type")) %>%
+  mutate(Cibersort = (estimates - truefraction))
+
+## DeconRNAseq
+drnas <- results$drnas %>% as.data.frame() %>%
+  tibble::rownames_to_column("sample") %>% 
+  tidyr::gather("type", "estimates", -sample) %>% 
+  inner_join(truefractions, by=c("sample", "type")) %>%
+  mutate(DeconRNAseq = (estimates - truefraction))
+
+## Stereoscope
+estimates <- readr::read_tsv('data/fig2/W.2020-06-20154131.618764.tsv') %>% dplyr::rename(sample = X1)
+stereo <- estimates %>% 
+  tidyr::gather("type", "estimates", -sample) %>% 
+  inner_join(truefractions, by=c("sample", "type")) %>%
+  mutate(Stereoscope = (estimates - truefraction))
+
+## GIST-base
+out <- results$bayconMean %>% as.data.frame() %>%
+  tibble::rownames_to_column("sample") %>% 
+  tidyr::gather("type", "estimates", -sample) %>% 
+  inner_join(truefractions, by=c("sample", "type")) %>%
+  mutate(`GIST-base` = (estimates - truefraction))
+
+## Errors
+errors <- Reduce(function(x, y) inner_join(x, y, by = c("sample", "type")),
+       list(linreg, cbs, drnas, out, stereo)) %>%
+  select(type, sample, lm, Cibersort, DeconRNAseq, `GIST-base`, Stereoscope) %>%
+  tidyr::gather("method", "error", -type, -sample) 
+
+p <- ggplot(errors, mapping = aes(x = fct_recode(fct_relevel(method, 
+                                                             c("lm", "Cibersort", "DeconRNAseq", "Stereoscope", "GIST-base")), 
+                                                 `Linear Regression` = "lm", CIBERSORT = "Cibersort"), y = error)) +
+  geom_boxplot(lwd = 0.1, outlier.size = 0.01, alpha = 0.5) + 
+  geom_point(aes(color = type), 
+             position = position_jitterdodge(jitter.width= 0.05, dodge.width = 0.5), 
+             size = 0.02, alpha = 1) +
+  ylab("Error") +
+  theme(
+    legend.key.height = unit(0.1, 'in'),
+    legend.key.width = unit(0.01, 'in'),
+    legend.key = element_rect(colour = "white", fill = "white"),
+    legend.title = element_blank(),
+    legend.text = element_text(family="Arial", face="plain", size=8),
+    legend.box.background = element_rect(colour = "white"),
+    legend.box.margin = margin(5.25,14,5.25,14),
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(), 
+    panel.background = element_rect(fill = "white", colour = "white"),
+    axis.ticks = element_line(colour = "black", size = 0.1),
+    axis.line = element_line(colour="black", size = 0.3),
+    axis.text = element_text(family="Arial", face="plain", size=8, colour="black"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(family="Arial", face="plain", size=8)) + 
+  scale_color_manual(values = c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33"), 
+                     labels = paste0("Cell type ", seq(6))) +
+  ggExtra::rotateTextX() +
+  guides(color = guide_legend(override.aes = list(size=1)))
+ggsave(filename="export/fig2/02_splatter_plus.svg", 
+       plot=p, height=3, width=3, units=c("in"), dpi=300)
+knitr::kable(errors %>% group_by(method) %>% summarise(mean(abs(error))))
+```
+
+
+## Immune deconvolution benchmark
+
+```{r}
+load("./data/fig2/idb_mixing_study_mapped_results.RData")
+cols <- c("value", paste0("value", seq(99)))
+
+truefractions <- gold_standard %>% tibble::rownames_to_column("type") %>% 
+  tidyr::gather("sample", "truefraction", -type)
+colnames(linreg) <- cols
+colnames(drnas) <- cols
+colnames(out) <- cols
+```
+
+
+```{r}
+linreg <- linreg %>% tibble::rownames_to_column("type") %>% 
+  tidyr::gather("sample", "estimates", -type) %>% 
+  inner_join(truefractions, by=c("sample", "type")) %>%
+  mutate(lm = (estimates - truefraction))
+
+## CIBERSORT
+cbs <- cbs %>% tibble::rownames_to_column("type") %>% 
+  tidyr::gather("sample", "estimates", -type) %>% 
+  inner_join(truefractions, by=c("sample", "type")) %>%
+  mutate(Cibersort = (estimates - truefraction))
+
+## DeconRNAseq
+drnas <- drnas %>% tibble::rownames_to_column("type") %>% 
+  tidyr::gather("sample", "estimates", -type) %>% 
+  inner_join(truefractions, by=c("sample", "type")) %>%
+  mutate(DeconRNAseq = (estimates - truefraction))
+
+## GIST-base
+out <- out %>% tibble::rownames_to_column("type") %>% 
+  tidyr::gather("sample", "estimates", -type) %>% 
+  inner_join(truefractions, by=c("sample", "type")) %>%
+  mutate(`GIST-base` = (estimates - truefraction))
+
+## Errors
+errors <- Reduce(function(x, y) inner_join(x, y, by = c("sample", "type")),
+       list(linreg, cbs, drnas, out)) %>%
+  select(type, sample, lm, Cibersort, DeconRNAseq, `GIST-base`) %>%
+  tidyr::gather("method", "error", -type, -sample) 
+
+p <- ggplot(errors, mapping = aes(x = fct_recode(fct_relevel(method, 
+                                             c("lm", "Cibersort", "DeconRNAseq", "GIST-base")), 
+                                            `Linear Regression` = "lm", CIBERSORT = "Cibersort"), 
+                             y = error)) +
+  geom_boxplot(lwd = 0.1, outlier.size = 0.01, alpha = 0.5) + 
+  geom_point(aes(color = type), position = position_jitterdodge(jitter.width= 0.05, dodge.width = 0.5), size = 0.02, alpha = 1) +
+  ylab("Error") + 
+  theme(
+    legend.key.width = unit(0.01, 'in'),
+    legend.key.height = unit(0.1, 'in'),
+    legend.key = element_rect(colour = "white", fill = "white"),
+    legend.title = element_blank(),
+    legend.text = element_text(family="Arial", face="plain", size=8),
+    legend.box.background = element_rect(colour = "white"),
+    legend.box.margin = margin(5.25,14,5.25,14),
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(), 
+    panel.background = element_rect(fill = "white", colour = "white"),
+    axis.ticks = element_line(colour = "black", size = 0.1),
+    axis.line = element_line(colour="black", size = 0.3),
+    axis.text = element_text(family="Arial", face="plain", size=8, colour="black"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(family="Arial", face="plain", size=8)) + 
+  scale_color_manual(values = c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33", "#a65628", "#f781bf")) +
+  ggExtra::rotateTextX() +
+  guides(color = guide_legend(nrow=4, override.aes = list(size=1)))
+ggsave(filename="export/fig2/03_idb_study.svg", 
+       plot=p, height=3.2, width=4, units=c("in"), dpi=300)
+knitr::kable(errors %>% group_by(method) %>% summarise(mean(abs(error))))
+```
